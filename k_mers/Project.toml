@@ -1,2 +1,6 @@
 [deps]
+BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
+ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 Kmers = "445028e4-d31f-4f27-89ad-17affd83fc22"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
