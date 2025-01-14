@@ -1,4 +1,6 @@
 # New version of KCT supporting new Kmers implementation, variable kmer size, variable kmer type, (RLE?)
+using Pkg
+Pkg.activate("k_mers/k_mers/")
 
 using Kmers
 using BioSequences
@@ -8,37 +10,45 @@ using ProgressMeter
 include("parallel_sort.jl")
 
 export Kct, Kct, load, save, merge
+const seq_codes = Dict{String, Type}(
+    "AA"=>AminoAcidAlphabet,
+    "DNA"=>DNAAlphabet{2},
+    "DNA4"=>DNAAlphabet{4},
+    "RNA"=>RNAAlphabet{2},
+    "RNA4"=>RNAAlphabet{4},
+)
 
 struct KRecord{K, Ab}
     seq::Mer{K, Ab}
     pool_id::UInt32
 end
 
-Base.isless(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Alphabet} = a.seq < b.seq 
-Base.isless(a::Mer{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Alphabet} = a < b.seq
-Base.isless(a::KRecord{K, Ab}, b::DNAKmer{K, 1}) where {K, Ab<:Alphabet} = a.seq < b
-Base.:(==)(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Alphabet} = a.seq == b.seq
+Base.isless(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a.seq < b.seq 
+Base.isless(a::Mer{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a < b.seq
+Base.isless(a::KRecord{K, Ab}, b::Mer{K, Ab}) where {K, Ab<:Type} = a.seq < b
+Base.:(==)(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a.seq == b.seq
 
 # const mask_big = 0x00000001 << 27
 isbig(x::UInt32, mask_big::UInt32) = x & mask_big != 0
 makebig(x::Integer, mask_big::UInt32) = UInt32(x) | mask_big
 idbig(x::UInt32, mask_big::UInt32) = x & (~mask_big)
 
-struct Kct{N, K, Ab<:Alphabet}
+struct Kct{N, K, Ab<:Type}
     table::Vector{KRecord{K, Ab}}
     idx::Vector{UnitRange{Int64}}
     small::ElasticMatrix{UInt8}
     big::ElasticMatrix{UInt32}
 end
 
-Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Alphabet} = Kct{N, K, Ab}(
+Kct(N, K, A::String) = Kct(N, K, seq_codes[A])
+Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Type} = Kct{N, K, Ab}(
     Vector{KRecord{K, A}}(undef, t),
     fill(0:-1, 4^11),
     Matrix{UInt8}(undef, N, s),
     Matrix{UInt32}(undef, N, b)
 )
 
-function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Alphabet}
+function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Type}
     if max(count...) ≤ typemax(UInt8)
         append!(kct.small, count)
         (_, id) = UInt32.(size(kct.small))
@@ -50,19 +60,19 @@ function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:
     return id
 end
 
-function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt8}) where {N, K, Ab<:Alphabet}
+function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt8}) where {N, K, Ab<:Type}
     append!(kct.small, count)
     (_, id) = UInt32.(size(kct.small))
     return id
 end
 
-function Base.push!(kct::Kct{N, K, Ab}, seq::Mer{K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Alphabet}
+function Base.push!(kct::Kct{N, K, Ab}, seq::Mer{K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Type}
     id = push!(kct, count)
     push!(kct.table, KRecord(seq, id))
     return id
 end
 
-function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Alphabet}
+function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Type}
     rec = kct.table[i]
     if mask_big & rec.pool_id != 0
         tmp_t = convert(Vector{UInt32}, kct.big[:, rec.pool_id & (~mask_big)])
@@ -73,7 +83,7 @@ function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Alphabet
 end
 
 
-function Base.getindex(kct::Kct{N, K, Ab}, idx::AbstractArray{M}) where {N, K, Ab<:Alphabet, M<:Integer}
+function Base.getindex(kct::Kct{N, K, Ab}, idx::AbstractArray{M}) where {N, K, Ab<:Type, M<:Integer}
     return [kct[i] for i in idx]
 end
 
@@ -138,7 +148,7 @@ Base.length(kct::Kct) = length(kct.table)
 
 # Base.getindex(kct::Kct, key::String) = kct[DNAKmer{K, 1}{K}(key)]
 
-function Base.show(io::IO, t::Tuple{Mer{K, Ab}, NTuple{N, UInt32}}) where {N, K, Ab<:Alphabet}
+function Base.show(io::IO, t::Tuple{Mer{K, Ab}, NTuple{N, UInt32}}) where {N, K, Ab<:Type}
     print(io, t[1], ": ", join(string.(t[2]), ", "))
 
 end
@@ -147,7 +157,7 @@ function Base.sort!(kct::Kct)
     psort!(kct.table)
 end
 
-function computeIndex!(kct::Kct{N, K, Ab}) where {N, K, Ab<:Alphabet}
+function computeIndex!(kct::Kct{N, K, Ab}) where {N, K, Ab<:Type}
     start = 1
     last_key = 0x0000000000000000
     bits_per_symbol = BioSequences.bits_per_symbol(BioSequences.BitsPerSymbol(Ab()))
@@ -185,7 +195,7 @@ end
 Parse a Jellyfish K-mer count table into a sorted array of DNAKmer{K, 1}. No
 verification is made on the header, use with caution. 
 """
-function Kct(fn::String, Ab::{A}=DNAAlphabet{2}) where {A<:Alphabet}
+function Kct(fn::String, A::Ab=DNAAlphabet{2}; big_only::Bool=false) where {Ab<:Type}
     
     f = open(fn, "r")
     offset = parse(Int, readuntil(f, "{"))
@@ -196,7 +206,8 @@ function Kct(fn::String, Ab::{A}=DNAAlphabet{2}) where {A<:Alphabet}
     seek(f, offset + json_start - 1) 
 
     K = parse(Int, header["cmdline"][findfirst(x->x=="-m", header["cmdline"])+1])
-    count_bytes = parse(Int, header["cmdline"][findfirst(x->x=="--out-counter-len", header["cmdline"])+1])
+    out_counter_len = findfirst(x->x=="--out-counter-len", header["cmdline"])
+    count_bytes = isnothing(out_counter_len) ? 4 : parse(Int, header["cmdline"][out_counter_len+1])
     println("Found k-mers of size $K and count encoded on $count_bytes bytes.")
 
     count_type = Dict(1=>UInt8,
@@ -211,20 +222,21 @@ function Kct(fn::String, Ab::{A}=DNAAlphabet{2}) where {A<:Alphabet}
 
     nb = Vector{count_type}()
     kct = Kct(1, K)
-    K_mer = Mer{K, Ab}
     prog = ProgressUnknown()
 
+    # Kmer{DNAAlphabet{2}, 31, 1}(Kmers.unsafe, NTuple{1, UInt64}(0x0000000000000000,))
+    # N term of kmers is the number of values in the Tuple (DNA: K/32, AA: K/8 for Int64)
     while(!eof(f))
         if count_shift - K*2 < 0
-            tmp_seq = K_mer((read(f, UInt64),))
+            println((read(f, UInt64),))
+            tmp_seq = Kmer{A, K, N}((read(f, UInt64),))
             tmp_nb = read(f, count_type)
         else
             line_bits = (read(f, UInt64),)
-            tmp_seq = K_mer(line_bits)
+            tmp_seq = Mer{K, A}(line_bits)
             tmp_nb = count_type(line_bits[1] >> count_shift & count_mask)
         end
-        # println(tmp_seq, " : ", tmp_nb)
-        # sleep(0.5)
+
         push!(kct.table, KRecord(tmp_seq, UInt32(0)))
         push!(nb, tmp_nb)
         next!(prog)
@@ -262,7 +274,7 @@ function Base.read(s::IO, ::Type{Kct})
     return kct
 end
 
-function Base.findfirst(kct::Kct{N, K}, key::Mer{K, Ab}) where {N, K, Ab<:Alphabet}
+function Base.findfirst(kct::Kct{N, K}, key::Mer{K, Ab}) where {N, K, Ab<:Type}
     idx_key = (key.data[1] >> 40) + 1
     r = kct.idx[idx_key]
     t = @view kct.table[r]

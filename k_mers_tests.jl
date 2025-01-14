@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate("k_mers/")
+Pkg.activate("k_mers/k_mers/")
 
 using Kmers
 using Random
