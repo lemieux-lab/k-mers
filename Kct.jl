@@ -13,42 +13,42 @@ export Kct, Kct, load, save, merge
 const seq_codes = Dict{String, Type}(
     "AA"=>AminoAcidAlphabet,
     "DNA"=>DNAAlphabet{2},
-    "DNA4"=>DNAAlphabet{4},
     "RNA"=>RNAAlphabet{2},
-    "RNA4"=>RNAAlphabet{4},
 )
 
-struct KRecord{K, Ab}
-    seq::Mer{K, Ab}
+bits_per_symbol(A::Ab) where {Ab<:Alphabet}= BioSequences.bits_per_symbol(BioSequences.BitsPerSymbol(A))
+
+struct KRecord{K, Ab<:Alphabet, C}
+    seq::Kmer{Ab, K, C}
     pool_id::UInt32
 end
 
-Base.isless(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a.seq < b.seq 
-Base.isless(a::Mer{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a < b.seq
-Base.isless(a::KRecord{K, Ab}, b::Mer{K, Ab}) where {K, Ab<:Type} = a.seq < b
-Base.:(==)(a::KRecord{K, Ab}, b::KRecord{K, Ab}) where {K, Ab<:Type} = a.seq == b.seq
+Base.isless(a::KRecord, b::KRecord) = a.seq < b.seq 
+Base.isless(a::Kmer, b::KRecord) = a < b.seq
+Base.isless(a::KRecord, b::Kmer) = a.seq < b
+Base.:(==)(a::KRecord, b::KRecord) = a.seq == b.seq
 
 # const mask_big = 0x00000001 << 27
 isbig(x::UInt32, mask_big::UInt32) = x & mask_big != 0
 makebig(x::Integer, mask_big::UInt32) = UInt32(x) | mask_big
 idbig(x::UInt32, mask_big::UInt32) = x & (~mask_big)
 
-struct Kct{N, K, Ab<:Type}
-    table::Vector{KRecord{K, Ab}}
+struct Kct{N, K, Ab<:Alphabet}
+    table::Vector{KRecord{K, Ab, C}} where {C}
     idx::Vector{UnitRange{Int64}}
     small::ElasticMatrix{UInt8}
     big::ElasticMatrix{UInt32}
 end
 
 Kct(N, K, A::String) = Kct(N, K, seq_codes[A])
-Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Type} = Kct{N, K, Ab}(
-    Vector{KRecord{K, A}}(undef, t),
+Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Type} = Kct{N, K, A}(
+    Vector{KRecord{K, A, ceil(Int64, K/(64/bits_per_symbol(A())))}}(undef, t),
     fill(0:-1, 4^11),
     Matrix{UInt8}(undef, N, s),
     Matrix{UInt32}(undef, N, b)
 )
 
-function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Type}
+function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Alphabet}
     if max(count...) ≤ typemax(UInt8)
         append!(kct.small, count)
         (_, id) = UInt32.(size(kct.small))
@@ -60,19 +60,19 @@ function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:
     return id
 end
 
-function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt8}) where {N, K, Ab<:Type}
+function Base.push!(kct::Kct{N, K, Ab}, count::Matrix{UInt8}) where {N, K, Ab<:Alphabet}
     append!(kct.small, count)
     (_, id) = UInt32.(size(kct.small))
     return id
 end
 
-function Base.push!(kct::Kct{N, K, Ab}, seq::Mer{K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Type}
+function Base.push!(kct::Kct{N, K, Ab}, seq::Mer{K, Ab}, count::Matrix{UInt32}) where {N, K, Ab<:Alphabet}
     id = push!(kct, count)
     push!(kct.table, KRecord(seq, id))
     return id
 end
 
-function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Type}
+function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Alphabet}
     rec = kct.table[i]
     if mask_big & rec.pool_id != 0
         tmp_t = convert(Vector{UInt32}, kct.big[:, rec.pool_id & (~mask_big)])
@@ -83,7 +83,7 @@ function Base.getindex(kct::Kct{N, K, Ab}, i::Integer) where {N, K, Ab<:Type}
 end
 
 
-function Base.getindex(kct::Kct{N, K, Ab}, idx::AbstractArray{M}) where {N, K, Ab<:Type, M<:Integer}
+function Base.getindex(kct::Kct{N, K, Ab}, idx::AbstractArray{M}) where {N, K, Ab<:Alphabet, M<:Integer}
     return [kct[i] for i in idx]
 end
 
@@ -148,8 +148,7 @@ Base.length(kct::Kct) = length(kct.table)
 
 # Base.getindex(kct::Kct, key::String) = kct[DNAKmer{K, 1}{K}(key)]
 
-function Base.show(io::IO, t::Tuple{Mer{K, Ab}, NTuple{N, UInt32}}) where {N, K, Ab<:Type}
-    print(io, t[1], ": ", join(string.(t[2]), ", "))
+function Base.show(io::IO, t::Tuple{Mer{K, Ab}, NTuple{N, UInt32}}) where {N, K, Ab<:Alphabet}
 
 end
 
@@ -157,13 +156,13 @@ function Base.sort!(kct::Kct)
     psort!(kct.table)
 end
 
-function computeIndex!(kct::Kct{N, K, Ab}) where {N, K, Ab<:Type}
+function computeIndex!(kct::Kct{N, K, Ab}) where {N, K, Ab<:Alphabet}
     start = 1
     last_key = 0x0000000000000000
-    bits_per_symbol = BioSequences.bits_per_symbol(BioSequences.BitsPerSymbol(Ab()))
+    symbol_size = bits_per_symbol(Ab())
     
     for i=1:length(kct.table)
-        key = kct.table[i].seq.data[1] >> 20*bits_per_symbol
+        key = kct.table[i].seq.data[1] >> 20*symbol_size
         if key > last_key
             kct.idx[last_key+1] = start:i
             start = i
@@ -202,13 +201,13 @@ function Kct(fn::String, A::Ab=DNAAlphabet{2}; big_only::Bool=false) where {Ab<:
     json_start = position(f)
     seek(f, position(f) - 1) # Need to grab the {
     header = JSON.parse(f)
-    println(header)
+    # println(header)
     seek(f, offset + json_start - 1) 
 
     K = parse(Int, header["cmdline"][findfirst(x->x=="-m", header["cmdline"])+1])
     out_counter_len = findfirst(x->x=="--out-counter-len", header["cmdline"])
     count_bytes = isnothing(out_counter_len) ? 4 : parse(Int, header["cmdline"][out_counter_len+1])
-    println("Found k-mers of size $K and count encoded on $count_bytes bytes.")
+    # println("Found k-mers of size $K and count encoded on $count_bytes bytes.")
 
     count_type = Dict(1=>UInt8,
                   2=>UInt16,
@@ -219,27 +218,30 @@ function Kct(fn::String, A::Ab=DNAAlphabet{2}; big_only::Bool=false) where {Ab<:
                   4=>0xFFFFFFFF)[count_bytes]
 
     count_shift = 64 - count_bytes * 8
+    
+    symbol_size = bits_per_symbol(A())
+    required_chunks = ceil(Int64, K/(64/symbol_size))  # On 64 bits
 
     nb = Vector{count_type}()
     kct = Kct(1, K)
-    prog = ProgressUnknown()
+    # prog = ProgressUnknown()
 
     # Kmer{DNAAlphabet{2}, 31, 1}(Kmers.unsafe, NTuple{1, UInt64}(0x0000000000000000,))
     # N term of kmers is the number of values in the Tuple (DNA: K/32, AA: K/8 for Int64)
     while(!eof(f))
-        if count_shift - K*2 < 0
-            println((read(f, UInt64),))
-            tmp_seq = Kmer{A, K, N}((read(f, UInt64),))
+        if count_shift - K*symbol_size < 0
+            # println((read(f, UInt64),))
+            tmp_seq = Kmer{A, K, required_chunks}(Kmers.unsafe, (read(f, UInt64),))
             tmp_nb = read(f, count_type)
         else
             line_bits = (read(f, UInt64),)
-            tmp_seq = Mer{K, A}(line_bits)
+            tmp_seq = Kmer{A, K, required_chunks}(Kmers.unsafe, line_bits)
             tmp_nb = count_type(line_bits[1] >> count_shift & count_mask)
         end
-
+        # println(KRecord(tmp_seq, UInt32(0)))
         push!(kct.table, KRecord(tmp_seq, UInt32(0)))
         push!(nb, tmp_nb)
-        next!(prog)
+        # next!(prog)
     end
 
     _dedup(kct, nb)
@@ -256,6 +258,8 @@ function Base.write(s::IO, kct::Kct{N, K}) where {N, K}
     write(s, length(kct.table))
     write(s, size(kct.small)[2])
     write(s, size(kct.big)[2])
+    # println(write(open("test", "w"), [kct.table[1]]))
+    # println(typeof(kct.table[1]), isbitstype(kct.table[1]), typeof(kct.table[1]), typeof(kct.table[1]) <: KRecord{31, DNAAlphabet{2}, 1})
     write(s, kct.table)
     write(s, kct.small)
     write(s, kct.big)
@@ -274,7 +278,7 @@ function Base.read(s::IO, ::Type{Kct})
     return kct
 end
 
-function Base.findfirst(kct::Kct{N, K}, key::Mer{K, Ab}) where {N, K, Ab<:Type}
+function Base.findfirst(kct::Kct{N, K}, key::Mer{K, Ab}) where {N, K, Ab<:Alphabet}
     idx_key = (key.data[1] >> 40) + 1
     r = kct.idx[idx_key]
     t = @view kct.table[r]
@@ -352,24 +356,24 @@ function Base.merge(a::Kct{M, K}, b::Kct{N, K}) where {M, N, K}
     i = 1
     j = 1
 
-    kct = Kct(M+N)
+    kct = Kct(M+N, K)
     p = Vector{Tuple{UInt32, UInt32}}()
 
     while i ≤ length(a) || j ≤ length(b)
         if j > length(b) || (i ≤ length(a) && a.table[i].seq < b.table[j].seq)
             push!(p, (a.table[i].pool_id, 0))
             # K = length(a.table[i].seq)
-            push!(kct.table, KRecord(a.table[i].seq, 0))
+            push!(kct.table, KRecord(a.table[i].seq, UInt32(0)))
             i += 1
         elseif i > length(a) || (j ≤ length(b) && b.table[j].seq < a.table[i].seq)
             push!(p, (0, b.table[j].pool_id))
             # K = length(a.table[i].seq)
-            push!(kct.table, KRecord(b.table[j].seq, 0))
+            push!(kct.table, KRecord(b.table[j].seq, UInt32(0)))
             j += 1
         else
             push!(p, (a.table[i].pool_id, b.table[j].pool_id))
             # K = a.table[i]
-            push!(kct.table, KRecord(a.table[i].seq, 0))
+            push!(kct.table, KRecord(a.table[i].seq, UInt32(0)))
             i += 1
             j += 1
         end

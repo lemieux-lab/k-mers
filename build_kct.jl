@@ -17,7 +17,7 @@ function build_kct_binary_tree(jf_files::Array{String, 1}, save_path::String="."
     for (sample_name, file) in zip(samples, jf_files)
         push!(tree_stack, Kct(file, big_only=big_only))
         if !(size(tree_stack[begin].big)[1] in done)
-            JuBox.save(tree_stack[begin], save_path*"tcga_brca_$(typeof(tree_stack[begin]))_samples_bt_backup.kct")
+            save(tree_stack[begin], save_path*"tcga_brca_$(typeof(tree_stack[begin]))_samples_bt_backup.kct")
             push!(done, size(tree_stack[begin].big)[1])
         end
 
@@ -40,7 +40,7 @@ function build_kct_binary_tree(jf_files::Array{String, 1}, save_path::String="."
     finish!(prog)
     # Extract the root node
     final_node = popfirst!(tree_stack)
-    JuBox.save(final_node, save_path*"tcga_brca_$(typeof(final_node))_samples_bt_backup.kct")
+    save(final_node, save_path*"tcga_brca_$(typeof(final_node))_samples_bt_backup.kct")
     
     # Cleanup any potential leftover leaf. Merges them linearly regardless of level.
     prog = Progress(length(tree_stack)-1, "Remaining merges to cleanup outstanding leaves"); ProgressMeter.update!(prog)
@@ -49,13 +49,13 @@ function build_kct_binary_tree(jf_files::Array{String, 1}, save_path::String="."
         next!(prog)
     end
     finish!(prog)
-    JuBox.save(tree_stack[end], save_path*"tcga_brca_$(typeof(tree_stack[end]))_samples_bt_backup.kct")
+    save(tree_stack[end], save_path*"tcga_brca_$(typeof(tree_stack[end]))_samples_bt_backup.kct")
 
     # Merging root node and cleanup node, which is the entirely built kct, in order of samples.
     final_node = merge(final_node, pop!(tree_stack))
 
     # Saving that kct
-    JuBox.save(final_node, save_path*"tcga_brca_$(length(samples))_samples_bt.kct")
+    save(final_node, save_path*"tcga_brca_$(length(samples))_samples_bt.kct")
 end
 
 jf_files = readlines("/u/jacquinn/Aboleth/data/multi_tcga_mini_balanced_samples.txt")
