@@ -10,7 +10,7 @@ using ProgressMeter
 include("parallel_sort.jl")
 
 export Kct, Kct, load, save, merge
-const seq_codes = Dict{String, Type}(
+const seq_codes = Dict{String, Type{Alphabet}}(
     "AA"=>AminoAcidAlphabet,
     "DNA"=>DNAAlphabet{2},
     "RNA"=>RNAAlphabet{2},
@@ -41,7 +41,7 @@ struct Kct{N, K, Ab<:Alphabet}
 end
 
 Kct(N, K, A::String) = Kct(N, K, seq_codes[A])
-Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Type} = Kct{N, K, A}(
+Kct(N, K, A::Ab=DNAAlphabet{2}, t=0, s=0, b=0) where {Ab<:Type{Alphabet}} = Kct{N, K, A}(
     Vector{KRecord{K, A, ceil(Int64, K/(64/bits_per_symbol(A())))}}(undef, t),
     fill(0:-1, 4^11),
     Matrix{UInt8}(undef, N, s),
@@ -194,7 +194,7 @@ end
 Parse a Jellyfish K-mer count table into a sorted array of DNAKmer{K, 1}. No
 verification is made on the header, use with caution. 
 """
-function Kct(fn::String, A::Ab=DNAAlphabet{2}; big_only::Bool=false) where {Ab<:Type}
+function Kct(fn::String, A::Ab=DNAAlphabet{2}; big_only::Bool=false) where {Ab<:Type{Alphabet}}
     
     f = open(fn, "r")
     offset = parse(Int, readuntil(f, "{"))
