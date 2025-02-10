@@ -10,7 +10,7 @@ using ProgressMeter
 include("parallel_sort.jl")
 
 export Kct, Kct, load, save, merge
-const seq_codes = Dict{String, Type{Alphabet}}(
+const seq_codes = Dict{String, Type{<:Alphabet}}(
     "AA"=>AminoAcidAlphabet,
     "DNA"=>DNAAlphabet{2},
     "RNA"=>RNAAlphabet{2},

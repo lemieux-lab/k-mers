@@ -39,29 +39,20 @@ end
 
 @inline function BioSequences.extract_encoded_element(seq::Kmer{<:AAAlphabet}, i::Integer)
     off = offset(seq)
-    off_idx = true_index(seq, i)
-    chunk_idx = chunk(seq, i)
     bps = BioSequences.bits_per_symbol(Alphabet(seq)) % UInt
-    first_carry_over = 5 - length(seq.data) % 5
-    carry_over = 5 - (length(seq.data)-chunk_idx) % 5
-    carried_over = 5-carry_over
+    start_bit, end_bit = off+bps*(i-1), off+bps*i-1
+    start_chunk, end_chunk = ceil(start_bit/64), ceil(end_bit/64)
+    trailing = start_bit % 64
 
-    # println("\n$off_idx, $chunk_idx, $first_carry_over")
-    # println("$((off_idx-1)*bps + first_carry_over), $(chunk_idx* 64)")
-    # println("$carry_over, $carried_over")
-    bound = (off_idx-1)*bps - chunk_idx*64 + first_carry_over
-    # println(bound)
-    cycled = (length(seq.data) - chunk_idx) % bps
-    # println(cycled)
+    if trailing == 0  # Just looped over (start chunk is off in these cases, there must be a more general implementation)
+        return seq.data[start_chunk+1] >> (64-bps)
 
-    if bound >= 0 && bound <= 64-bps
-        # println("std: " * bin(seq.data[chunk_idx+1] << bound >> (64-bps)))
-        return seq.data[chunk_idx+1] << bound >> (64-bps)
+    elseif start_chunk == end_chunk  # All in one chunk (std case)
+        return seq.data[start_chunk] << trailing >> (64-bps)
+
     else
-        # println("except 1: " * bin((seq.data[chunk_idx]<<(64-carried_over)>>(64-carried_over-carry_over)) | (seq.data[chunk_idx+1] >> (64-carry_over))))
-        # cycled_correction && println(cycled_correction)
-        left_chunk_extract = seq.data[chunk_idx]<<(64-carried_over)>>(64-carried_over-carry_over)
-        right_chunk_extract = seq.data[chunk_idx+1] >> (64-carry_over)
-        return  left_chunk_extract | right_chunk_extract 
+        overspill = end_bit % 64 + 1  # split across 2 chunks
+       return (seq.data[start_chunk] << trailing >> (64-bps)) | (seq.data[end_chunk] >> (64-overspill))
+
     end
 end
