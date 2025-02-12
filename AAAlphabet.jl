@@ -40,9 +40,11 @@ end
 @inline function BioSequences.extract_encoded_element(seq::Kmer{<:AAAlphabet}, i::Integer)
     off = offset(seq)
     bps = BioSequences.bits_per_symbol(Alphabet(seq)) % UInt
-    start_bit, end_bit = off+bps*(i-1), off+bps*i-1
+    start_bit, end_bit = off+bps*(i-1), off+bps*i
     start_chunk, end_chunk = ceil(start_bit/64), ceil(end_bit/64)
     trailing = start_bit % 64
+    # println(trailing)
+    # println(start_chunk, end_chunk)
 
     if trailing == 0  # Just looped over (start chunk is off in these cases, there must be a more general implementation)
         return seq.data[start_chunk+1] >> (64-bps)
@@ -51,7 +53,7 @@ end
         return seq.data[start_chunk] << trailing >> (64-bps)
 
     else
-        overspill = end_bit % 64 + 1  # split across 2 chunks
+        overspill = end_bit % 64 # split across 2 chunks
        return (seq.data[start_chunk] << trailing >> (64-bps)) | (seq.data[end_chunk] >> (64-overspill))
 
     end
