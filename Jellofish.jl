@@ -63,11 +63,34 @@ function k_merize(sequence::LongSequence{Ab}; K::Int) where {Ab<:Alphabet}
     return to_return
 end
 
+function jello_hash(fastq::String; K::Int)
+    hash = Dict{UInt64,UInt32}()
+    wcl = countlines(fastq)
+    progress = Progress(wcl, desc="Parsing fastq into hash...")
+    open(fastq) do f
+        for (i, l) in enumerate(eachline(f))
+            (i-2)%4 != 0 && continue    # Skips non-sequence lines of fastq
+            
+            seq = bioseq(l)
+            kmers = k_merize(seq, K=K)
+            for kmer in kmers
+                if !(haskey(hash, kmer.data[1]))
+                    hash[kmer.data[1]] = UInt32(0)
+                end
+                hash[kmer.data[1]] += 1
+            end
+            next!(progress; showvalues=[
+                ("unique k-mers", length(hash))])
+        end
+    end
+    return hash
+end
+
 function jello_trie(fastq::String, Sb::Type{<:BioSymbol}=DNA; K::Int)
     GC.enable(false)
     trie = init_trie(K, Sb)
     wcl = countlines(fastq)
-    progess = Progress(wcl, desc="Parsing fastq into trie...")
+    progress = Progress(wcl, desc="Parsing fastq into trie...")
     open(fastq) do f
         for (i, l) in enumerate(eachline(f))
             (i-2)%4 != 0 && continue    # Skips non-sequence lines of fastq
@@ -75,7 +98,7 @@ function jello_trie(fastq::String, Sb::Type{<:BioSymbol}=DNA; K::Int)
             seq = bioseq(l)
             kmers = k_merize(seq, K=K)
             push!.(Ref(trie), kmers)
-            next!(progess; showvalues=[
+            next!(progress; showvalues=[
                 ("unique k-mers", length(trie.counts))
                 ("counts memory size", Base.format_bytes(Base.summarysize(trie.counts)))
                 ])
