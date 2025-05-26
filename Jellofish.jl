@@ -64,7 +64,7 @@ function k_merize(sequence::LongSequence{Ab}; K::Int) where {Ab<:Alphabet}
 end
 
 function jello_hash(fastq::String; K::Int)
-    hash = Dict{UInt64,UInt32}()
+    hash = Dict{UInt64, UInt32}()
     wcl = countlines(fastq)
     progress = Progress(wcl, desc="Parsing fastq into hash...")
     open(fastq) do f
@@ -86,8 +86,47 @@ function jello_hash(fastq::String; K::Int)
     return hash
 end
 
+function jello_threaded_hash(fastq::String, K::Int, chunking::Int=1_000_000, queue_size::Int=32)
+    @time lines = readlines(open(fastq, "r"))[2:4:end]
+    chunks = [lines[i:min(i+chunking-1, end)] for i in 1:chunking:length(lines)]
+    merge_queue = Channel{Dict{UInt64, UInt32}}(queue_size)
+    mother_hash = Dict{UInt64, UInt32}()
+    merger = @async try
+        for child_hash in merge_queue
+            mother_hash = merge(+, mother_hash, child_hash)
+        end
+    catch e
+        @error "Merger task crashed" exception=(e, catch_backtrace())
+    end
+
+    progress = Progress(length(chunks), desc = "Processing $chunking k-mers chunks...")
+    # Worker threads, building child Kcts asynchronously
+    @threads for chunk in chunks
+        hash = Dict{UInt64, UInt32}()
+        for l in chunk
+            seq = bioseq(l)
+            kmers = k_merize(seq, K=K)
+            for kmer in kmers
+                if !(haskey(hash, kmer.data[1]))
+                    hash[kmer.data[1]] = UInt32(0)
+                end
+                hash[kmer.data[1]] += 1
+            end
+        end
+
+        put!(merge_queue, hash)
+        next!(progress; showvalues=[
+                ("items in merge queue", merge_queue.n_avail_items)
+                ])
+    end
+    
+    close(merge_queue)
+    wait(merger)
+    return mother_hash
+end
+
 function jello_trie(fastq::String, Sb::Type{<:BioSymbol}=DNA; K::Int)
-    GC.enable(false)
+    # GC.enable(false)
     trie = init_trie(K, Sb)
     wcl = countlines(fastq)
     progress = Progress(wcl, desc="Parsing fastq into trie...")
@@ -104,59 +143,12 @@ function jello_trie(fastq::String, Sb::Type{<:BioSymbol}=DNA; K::Int)
                 ])
         end
     end
-    GC.enable(true)
+    # GC.enable(true)
     return trie
 end
 
 function collapse(kct::Kct)
 
-end
-
-function concurrent_merger(merge_queue::Channel{Kct{1, K}}) where K
-    queue = Vector{Kct{1, K}}()
-    lock = ReentrantLock()
-    cond = Condition()
-
-    # Consumer that listens to the input channel and accumulates KCTs
-    reader = @async begin
-        for kct in merge_queue
-            lock(lock) do
-                push!(queue, kct)
-                notify(cond)
-            end
-        end
-    end
-
-    # Parallel merger tasks
-    merger = @async begin
-        while true
-            local_kct1, local_kct2 = nothing, nothing
-
-            lock(lock) do
-                while length(queue) < 2 && isopen(merge_queue)
-                    wait(cond)
-                end
-                if length(queue) >= 2
-                    local_kct1 = pop!(queue)
-                    local_kct2 = pop!(queue)
-                elseif !isopen(merge_queue) && length(queue) == 1
-                    return queue[1]  # final mother_kct
-                end
-            end
-
-            if local_kct1 !== nothing && local_kct2 !== nothing
-                @async begin
-                    merged = merge(local_kct1, local_kct2)
-                    lock(lock) do
-                        push!(queue, merged)
-                        notify(cond)
-                    end
-                end
-            end
-        end
-    end
-
-    return fetch(merger)  # final mother_kct
 end
 
 
