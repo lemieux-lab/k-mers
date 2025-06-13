@@ -2,6 +2,7 @@
 BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
 BioSymbols = "3c28c6f8-a34d-59c4-9654-267d177fcfa9"
 ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
+EzXML = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 JuBox = "33c16bc7-715f-4b5e-ac98-9a87e2edc099"
 Kmers = "445028e4-d31f-4f27-89ad-17affd83fc22"
